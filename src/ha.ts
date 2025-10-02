@@ -24,6 +24,9 @@ export type ErrorMessage = {
 
 export type ResultMessage = SuccessMessage | ErrorMessage;
 
+export type Hole = { from: string; to: string };
+//export type Hole = { from: dayjs.Dayjs; to: dayjs.Dayjs };
+
 function getStatisticId(args: { prm: string; isProduction: boolean; isCost?: boolean }): string {
   const { prm, isProduction, isCost } = args;
   return `${isProduction ? 'linky_prod' : 'linky'}:${prm}${isCost ? '_cost' : ''}`;
@@ -168,6 +171,126 @@ export class HomeAssistantClient {
 
     debug(`No statistics found for PRM ${prm} in Home Assistant`);
     return null;
+  }
+
+  /* -------------------------------------------------
+     Helper – find the oldest statistic (or null)
+     ------------------------------------------------- */
+  private async findOldestStatistic(statisticId: string): Promise<StatisticDataPoint | null> {
+    // Scan the last 3*52 weeks backwards; stop at the first block that contains data.
+    for (let i = 3 * 51; i >= 0; i--) {
+      const start = dayjs()
+        .subtract((i + 1) * 7, 'day')
+        .startOf('day')
+        .format('YYYY-MM-DDTHH:mm:ss.SSS[Z]');
+      const end = dayjs()
+        .subtract(i * 7, 'day')
+        .startOf('day')
+        .format('YYYY-MM-DDTHH:mm:ss.SSS[Z]');
+
+      const resp = await this.sendMessage({
+        type: 'recorder/statistics_during_period',
+        start_time: start,
+        end_time: end,
+        statistic_ids: [statisticId],
+        period: 'day',
+      });
+
+      const points = (resp as SuccessMessage).result[statisticId] as StatisticDataPoint[] | undefined;
+
+      if (points && points.length > 0) {
+        // Return the earliest point in this block (the oldest overall)
+        return points[0];
+      }
+    }
+    return null; // no data at all
+  }
+
+  /* -------------------------------------------------
+     Public async generator – missing‑day holes
+     ------------------------------------------------- */
+  public async *missingDayRanges(args: {
+    prm: string;
+    isProduction: boolean;
+    isCost?: boolean;
+    /** optional ISO‑8601 start day (UTC, 00:00) */
+    startDay?: string;
+  }): AsyncGenerator<Hole, void, unknown> {
+    const { prm, isProduction, isCost = false, startDay } = args;
+    const statisticId = getStatisticId({ prm, isProduction, isCost });
+
+    // ---------- 1️⃣ Determine effective start ----------
+    let cursor: dayjs.Dayjs;
+    if (startDay) {
+      cursor = dayjs(startDay).startOf('day');
+    } else {
+      const oldest = await this.findOldestStatistic(statisticId);
+      if (!oldest) {
+        // No statistics at all → exit immediately
+        return;
+      }
+      cursor = dayjs(oldest.start).add(1, 'day').startOf('day');
+    }
+
+    const today = dayjs().startOf('day');
+
+    // ---------- 2️⃣ Walk forward, yielding holes ----------
+    while (cursor.isBefore(today)) {
+      const start = cursor.format('YYYY-MM-DDTHH:mm:ss.SSS[Z]');
+      const end = cursor.add(1, 'day').format('YYYY-MM-DDTHH:mm:ss.SSS[Z]');
+
+      const resp = await this.sendMessage({
+        type: 'recorder/statistics_during_period',
+        start_time: start,
+        end_time: end,
+        statistic_ids: [statisticId],
+        period: 'day',
+      });
+
+      const points = (resp as SuccessMessage).result[statisticId] as StatisticDataPoint[] | undefined;
+
+      if (!points || points.length === 0) {
+        // ---- start a hole -------------------------------------------------
+        const holeStart = cursor.clone();
+
+        // extend until a day with data is found
+        while (true) {
+          cursor = cursor.add(1, 'day');
+          if (cursor.isAfter(today)) break;
+
+          const nxtStart = cursor.format('YYYY-MM-DDTHH:mm:ss.SSS[Z]');
+          const nxtEnd = cursor.add(1, 'day').format('YYYY-MM-DDTHH:mm:ss.SSS[Z]');
+
+          const nxtResp = await this.sendMessage({
+            type: 'recorder/statistics_during_period',
+            start_time: nxtStart,
+            end_time: nxtEnd,
+            statistic_ids: [statisticId],
+            period: 'day',
+          });
+
+          const nxtPoints = (nxtResp as SuccessMessage).result[statisticId] as StatisticDataPoint[] | undefined;
+
+          if (nxtPoints && nxtPoints.length > 0) {
+            // hole ends right before this day
+            yield { from: holeStart.toISOString(), to: cursor.toISOString() };
+            break;
+          }
+        }
+      } else {
+        // day has data → move to next day
+        cursor = cursor.add(1, 'day');
+      }
+    }
+  }
+
+  /* -------------------------------------------------
+     Example helper – log all missing ranges
+     ------------------------------------------------- */
+  public async logMissingRanges(params: { prm: string; isProduction: boolean; isCost?: boolean; startDay?: string }) {
+    for await (const hole of this.missingDayRanges(params)) {
+      debug(`Missing statistics from ${hole.from} to ${hole.to}`);
+    }
   }
 
   public async purge(prm: string, isProduction: boolean) {

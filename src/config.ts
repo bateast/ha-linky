@@ -7,6 +7,7 @@ export type MeterConfig = {
   action: 'sync' | 'reset';
   production: boolean;
   costs?: CostConfig[];
+  fill: boolean;
 };
 
 export type CostConfig = {
@@ -24,7 +25,7 @@ export function getUserConfig(): UserConfig {
   let parsed: { meters?: any[]; costs?: any } = {};
 
   try {
-    parsed = JSON.parse(readFileSync('/data/options.json', 'utf8'));
+    parsed = JSON.parse(readFileSync('./data/options.json', 'utf8'));
   } catch (e) {
     throw new Error('Cannot read user configuration: ' + e.toString());
   }
@@ -40,6 +41,7 @@ export function getUserConfig(): UserConfig {
           name: meter.name || 'Linky',
           action: meter.action === 'reset' ? 'reset' : 'sync',
           production: meter.production === true,
+          fill: meter.fill === true,
         };
         if (!resultMeter.production && Array.isArray(parsed.costs)) {
           const prmCostConfigs = parsed.costs.filter((cost) => !cost.prm || cost.prm === meter.prm);
