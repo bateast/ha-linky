@@ -37,13 +37,13 @@ export function formatLoadCurve(data: LinkyRawPoint[]): LinkyDataPoint[] {
   }));
 }
 
-export function formatAsStatistics(data: LinkyDataPoint[]): StatisticDataPoint[] {
+export function formatAsStatistics(data: LinkyDataPoint[], sum?: 0 | number): StatisticDataPoint[] {
   const result: StatisticDataPoint[] = [];
   for (let i = 0; i < data.length; i++) {
     result[i] = {
       start: data[i].date,
       state: data[i].value,
-      sum: data[i].value + (i === 0 ? 0 : result[i - 1].sum),
+      sum: data[i].value + (i === 0 ? (!sum ? 0 : sum) : result[i - 1].sum),
     };
   }
 

@@ -5,6 +5,9 @@ import { getMeterHistory } from './history.js';
 import { incrementSums } from './format.js';
 import { computeCosts } from './cost.js';
 import { debug, error, info, warn } from './log.js';
+import { formatAsStatistics } from './format.js';
+
+import util from 'node:util';
 import cron from 'node-cron';
 import dayjs from 'dayjs';
 
@@ -32,26 +35,69 @@ async function main() {
     if (config.fill) {
       debug(`Looking for holes: ${config.fill}`);
       const client = new LinkyClient(config.token, config.prm, config.production);
-      const energyData = await client.getEnergyData(null);
+      const raw_data = await client.getEnergyData(null);
+      debug(`Raw energy: ${util.inspect(raw_data, { depth: null, colors: false })}`);
+
       for await (const hole of haClient.missingDayRanges({
         prm: config.prm,
         isProduction: config.production,
       })) {
+        debug(`Missing statistics from ${hole.from} to ${hole.to}  (last sum: ${hole.lastSum})`);
         // keep points where start ≥ from && start < to
-        const holeData = energyData.filter((pt) => {
-          const ptStart = dayjs(pt.start);
+        const holeDataRaw = raw_data.filter((pt) => {
+          const ptStart = dayjs(pt.date);
           const notBeforeFrom = !ptStart.isBefore(hole.from); // same as ≥ from
           const beforeTo = ptStart.isBefore(hole.to); // < to
           return notBeforeFrom && beforeTo;
         });
 
-        debug(`Missing statistics from ${hole.from} to ${hole.to}  (last sum: ${hole.lastSum})`);
+        if (holeDataRaw.length === 0) {
+          continue;
+        }
+        const holeData = formatAsStatistics(holeDataRaw, hole.lastSum);
+        debug(`Values: ${util.inspect(holeData, { depth: null, colors: false })}`);
+
         await haClient.saveStatistics({
           prm: config.prm,
           name: config.name,
           isProduction: config.production,
-          stats: incrementSums(holeData, hole.lastSum),
+          stats: holeData,
         });
+        if (0 < holeData.length) {
+          const holeSum = holeData[holeData.length - 1].sum - hole.lastSum;
+          debug(`Adjusting ${hole.next} sum with ${holeSum}`);
+          await haClient.adjustSum({
+            prm: config.prm,
+            date: hole.next,
+            value: holeSum,
+            isProduction: config.production,
+          });
+        }
+        if (config.costs && hole.lastCost) {
+          const holeCosts = computeCosts(holeData, config.costs, hole.lastCost);
+
+          if (holeCosts.length > 0) {
+            debug(`Costs: ${util.inspect(holeCosts, { depth: null, colors: false })}`);
+            await haClient.saveStatistics({
+              prm: config.prm,
+              name: config.name,
+              isProduction: config.production,
+              isCost: true,
+              stats: holeCosts,
+            });
+            if (0 < holeCosts.length) {
+              const holeSumCosts = holeCosts[holeCosts.length - 1].sum - hole.lastCost;
+              debug(`Adjusting ${hole.next} Costs sum with ${holeSumCosts}`);
+              await haClient.adjustSum({
+                prm: config.prm,
+                date: hole.next,
+                value: holeSumCosts,
+                isProduction: config.production,
+                isCost: true,
+              });
+            }
+          }
+        }
       }
       haClient.disconnect();
       return;
@@ -77,7 +123,7 @@ async function main() {
 
     if (energyData.length === 0) {
       const client = new LinkyClient(config.token, config.prm, config.production);
-      energyData = await client.getEnergyData(null);
+      energyData = formatAsStatistics(await client.getEnergyData(null));
     }
 
     if (energyData.length === 0) {
@@ -129,7 +175,7 @@ async function main() {
     }
     const client = new LinkyClient(config.token, config.prm, config.production);
     const firstDay = dayjs(lastStatistic.start).add(1, 'day');
-    const energyData = await client.getEnergyData(firstDay);
+    const energyData = formatAsStatistics(await client.getEnergyData(firstDay));
     await haClient.saveStatistics({
       prm: config.prm,
       name: config.name,
