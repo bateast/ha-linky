@@ -20,7 +20,7 @@ export class LinkyClient {
     this.session.userAgent = 'ha-linky/1.5.0';
   }
 
-  public async getEnergyData(firstDay: null | Dayjs): Promise<StatisticDataPoint[]> {
+  public async getEnergyData(firstDay: null | Dayjs, lastDay?: Dayjs): Promise<StatisticDataPoint[]> {
     const history: LinkyDataPoint[][] = [];
     let offset = 0;
     let limitReached = false;
@@ -36,7 +36,11 @@ export class LinkyClient {
       limitReached = true;
     }
 
-    let to = dayjs().subtract(offset, 'days').format('YYYY-MM-DD');
+    const effectiveLast = lastDay ? lastDay.endOf('day') : dayjs().endOf('day');
+    // `to` must never exceed the user‑supplied `lastDay`
+    let to = dayjs().subtract(offset, 'days').isAfter(effectiveLast)
+      ? effectiveLast.format('YYYY-MM-DD')
+      : dayjs().subtract(offset, 'days').format('YYYY-MM-DD');
 
     try {
       const loadCurve = this.isProduction

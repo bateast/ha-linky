@@ -24,8 +24,7 @@ export type ErrorMessage = {
 
 export type ResultMessage = SuccessMessage | ErrorMessage;
 
-export type Hole = { from: string; to: string };
-//export type Hole = { from: dayjs.Dayjs; to: dayjs.Dayjs };
+export type Hole = { from: dayjs.Dayjs; to: dayjs.Dayjs; lastSum: number };
 
 function getStatisticId(args: { prm: string; isProduction: boolean; isCost?: boolean }): string {
   const { prm, isProduction, isCost } = args;
@@ -235,6 +234,24 @@ export class HomeAssistantClient {
     const today = dayjs().startOf('day');
 
     // ---------- 2️⃣ Walk forward, yielding holes ----------
+    // Helper to fetch the last known sum *before* a given day
+    const fetchLastSum = async (day: dayjs.Dayjs): Promise<number> => {
+      const resp = await this.sendMessage({
+        type: 'recorder/statistics_during_period',
+        start_time: day.subtract(1, 'day').format('YYYY-MM-DDTHH:mm:ss.SSS[Z]'),
+        end_time: day.format('YYYY-MM-DDTHH:mm:ss.SSS[Z]'),
+        statistic_ids: [statisticId],
+        period: 'day',
+      });
+      const points = (resp as SuccessMessage).result[statisticId] as StatisticDataPoint[] | undefined;
+      if (points && points.length > 0) {
+        // `sum` is the cumulative value stored by Home Assistant
+        return points[points.length - 1].sum;
+      }
+      // No prior data – treat as zero
+      return 0;
+    };
+
     while (cursor.isBefore(today)) {
       const start = cursor.format('YYYY-MM-DDTHH:mm:ss.SSS[Z]');
       const end = cursor.add(1, 'day').format('YYYY-MM-DDTHH:mm:ss.SSS[Z]');
@@ -273,7 +290,7 @@ export class HomeAssistantClient {
 
           if (nxtPoints && nxtPoints.length > 0) {
             // hole ends right before this day
-            yield { from: holeStart.toISOString(), to: cursor.toISOString() };
+            yield { from: holeStart, to: cursor, lastSum: await fetchLastSum(holeStart) };
             break;
           }
         }
@@ -289,7 +306,7 @@ export class HomeAssistantClient {
      ------------------------------------------------- */
   public async logMissingRanges(params: { prm: string; isProduction: boolean; isCost?: boolean; startDay?: string }) {
     for await (const hole of this.missingDayRanges(params)) {
-      debug(`Missing statistics from ${hole.from} to ${hole.to}`);
+      debug(`Missing statistics from ${hole.from} to ${hole.to} (last sum: ${hole.lastSum})`);
     }
   }
 

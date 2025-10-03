@@ -29,6 +29,33 @@ async function main() {
       await haClient.purge(config.prm, config.production);
       info(`Statistics removed successfully for PRM ${config.prm} !`);
     }
+    if (config.fill) {
+      debug(`Looking for holes: ${config.fill}`);
+      const client = new LinkyClient(config.token, config.prm, config.production);
+      const energyData = await client.getEnergyData(null);
+      for await (const hole of haClient.missingDayRanges({
+        prm: config.prm,
+        isProduction: config.production,
+      })) {
+        // keep points where start ≥ from && start < to
+        const holeData = energyData.filter((pt) => {
+          const ptStart = dayjs(pt.start);
+          const notBeforeFrom = !ptStart.isBefore(hole.from); // same as ≥ from
+          const beforeTo = ptStart.isBefore(hole.to); // < to
+          return notBeforeFrom && beforeTo;
+        });
+
+        debug(`Missing statistics from ${hole.from} to ${hole.to}  (last sum: ${hole.lastSum})`);
+        await haClient.saveStatistics({
+          prm: config.prm,
+          name: config.name,
+          isProduction: config.production,
+          stats: incrementSums(holeData, hole.lastSum),
+        });
+      }
+      haClient.disconnect();
+      return;
+    }
   }
 
   // Stop if nothing else to do
