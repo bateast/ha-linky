@@ -1,13 +1,7 @@
 import { Session } from 'linky';
 import dayjs, { Dayjs } from 'dayjs';
 import { debug, info, warn } from './log.js';
-import {
-  formatDailyData,
-  formatLoadCurve,
-  formatAsStatistics,
-  type StatisticDataPoint,
-  type LinkyDataPoint,
-} from './format.js';
+import { formatDailyData, formatLoadCurve, type LinkyDataPoint } from './format.js';
 
 export class LinkyClient {
   private session: Session;
@@ -20,7 +14,7 @@ export class LinkyClient {
     this.session.userAgent = 'ha-linky/1.5.0';
   }
 
-  public async getEnergyData(firstDay: null | Dayjs): Promise<StatisticDataPoint[]> {
+  public async getEnergyData(firstDay: null | Dayjs, lastDay?: Dayjs): Promise<LinkyDataPoint[]> {
     const history: LinkyDataPoint[][] = [];
     let offset = 0;
     let limitReached = false;
@@ -36,7 +30,11 @@ export class LinkyClient {
       limitReached = true;
     }
 
-    let to = dayjs().subtract(offset, 'days').format('YYYY-MM-DD');
+    const effectiveLast = lastDay ? lastDay.endOf('day') : dayjs().endOf('day');
+    // `to` must never exceed the user‑supplied `lastDay`
+    let to = dayjs().subtract(offset, 'days').isAfter(effectiveLast)
+      ? effectiveLast.format('YYYY-MM-DD')
+      : dayjs().subtract(offset, 'days').format('YYYY-MM-DD');
 
     try {
       const loadCurve = this.isProduction
@@ -101,7 +99,7 @@ export class LinkyClient {
       info(`Data import returned ${dataPoints.length} data points from ${intervalFrom} to ${intervalTo}`);
     }
 
-    return formatAsStatistics(dataPoints);
+    return dataPoints;
   }
 }
 

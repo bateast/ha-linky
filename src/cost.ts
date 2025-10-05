@@ -3,7 +3,11 @@ import { CostConfig } from './config.js';
 import dayjs from 'dayjs';
 import { info } from './log.js';
 
-export function computeCosts(energy: StatisticDataPoint[], costConfigs: CostConfig[]): StatisticDataPoint[] {
+export function computeCosts(
+  energy: StatisticDataPoint[],
+  costConfigs: CostConfig[],
+  sum?: 0 | number,
+): StatisticDataPoint[] {
   const result: StatisticDataPoint[] = [];
 
   for (const point of energy) {
@@ -13,7 +17,8 @@ export function computeCosts(energy: StatisticDataPoint[], costConfigs: CostConf
       result.push({
         start: point.start,
         state: cost,
-        sum: Math.round(1000 * ((result.length === 0 ? 0 : result[result.length - 1].sum) + cost)) / 1000,
+        sum:
+          Math.round(1000 * ((result.length === 0 ? (!sum ? 0 : sum) : result[result.length - 1].sum) + cost)) / 1000,
       });
     }
   }

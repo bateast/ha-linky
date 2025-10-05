@@ -7,6 +7,7 @@ export type MeterConfig = {
   action: 'sync' | 'reset';
   production: boolean;
   costs?: CostConfig[];
+  fill: number;
 };
 
 export type CostConfig = {
@@ -40,6 +41,7 @@ export function getUserConfig(): UserConfig {
           name: meter.name || 'Linky',
           action: meter.action === 'reset' ? 'reset' : 'sync',
           production: meter.production === true,
+          fill: meter.fill,
         };
         if (!resultMeter.production && Array.isArray(parsed.costs)) {
           const prmCostConfigs = parsed.costs.filter((cost) => !cost.prm || cost.prm === meter.prm);
