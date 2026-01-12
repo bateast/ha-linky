@@ -25,7 +25,7 @@ export function getUserConfig(): UserConfig {
   let parsed: { meters?: any[]; costs?: any } = {};
 
   try {
-    parsed = JSON.parse(readFileSync('/data/options.json', 'utf8'));
+    parsed = JSON.parse(readFileSync('./data/options.json', 'utf8'));
   } catch (e) {
     throw new Error('Cannot read user configuration: ' + e.toString());
   }

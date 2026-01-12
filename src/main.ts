@@ -106,10 +106,6 @@ export async function main() {
     const client = new LinkyClient(config.token, config.prm, config.production);
     const firstDay = dayjs(lastStatistic.start) < fillDay ? dayjs(lastStatistic.start).add(1, 'day') : fillDay;
     const rawData = await client.getEnergyData(firstDay);
-    if (config.fill) {
-      debug(`Filling hole starting at ${fillDay.format()}`);
-      await runFill(config, haClient, rawData, fillDay.format());
-    }
     const newData = rawData.filter((pt) => {
       const ptStart = dayjs(pt.date);
       return ptStart.isAfter(dayjs(lastStatistic.start));
@@ -138,6 +134,10 @@ export async function main() {
           stats: incrementSums(costs, lastCostStatistic?.sum || 0),
         });
       }
+    }
+    if (config.fill) {
+      debug(`Filling hole starting at ${fillDay.format()}`);
+      await runFill(config, haClient, rawData, fillDay.format());
     }
   }
 
